@@ -1,0 +1,35 @@
+# Build artifacts
+/build/
+/dist/
+/out/
+/bin/
+/obj/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Test artifacts
+/tests/test_all
+/tests/*.exe
+
+# Local dependency clone used for tests
+/microtest/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+git.txt

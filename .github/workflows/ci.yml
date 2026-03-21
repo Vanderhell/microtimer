@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    name: Build and Test (${{ matrix.cc }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clone microtest dependency
+        run: git clone --depth 1 https://github.com/Vanderhell/microtest.git ../microtest
+
+      - name: Build and run tests
+        run: make -C tests CC=${{ matrix.cc }}
