@@ -79,7 +79,7 @@ jobs:
           }
 
           $devCmd = Join-Path $installationPath "Common7\Tools\VsDevCmd.bat"
-          $command = "`"$devCmd`" -arch=x64 && cmake -S . -B build -G Ninja -DMICROTIMER_BUILD_TESTS=ON -DCMAKE_C_COMPILER=cl -DCMAKE_C_FLAGS=/W4\ /WX && cmake --build build && ctest --test-dir build --output-on-failure"
+          $command = "`"$devCmd`" -arch=x64 && cmake -S . -B build -G Ninja -DMICROTIMER_BUILD_TESTS=ON -DCMAKE_C_COMPILER=cl -DCMAKE_C_FLAGS:STRING=`"/W4 /WX`" && cmake --build build && ctest --test-dir build --output-on-failure"
           cmd /c $command
 
   install-consumers:
