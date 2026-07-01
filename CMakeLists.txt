@@ -60,6 +60,7 @@ install(FILES
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/microtimer")
 
 if(MICROTIMER_BUILD_TESTS)
+    enable_language(CXX)
     enable_testing()
     add_subdirectory(tests)
 endif()
