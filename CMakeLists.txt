@@ -23,6 +23,11 @@ target_include_directories(microtimer
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
+string(REGEX MATCHALL "-fsanitize=[^ ]+" MICROTIMER_SANITIZER_FLAGS "${CMAKE_C_FLAGS}")
+if(MICROTIMER_SANITIZER_FLAGS)
+    target_link_options(microtimer INTERFACE ${MICROTIMER_SANITIZER_FLAGS})
+endif()
+
 set_target_properties(microtimer PROPERTIES
     EXPORT_NAME microtimer
     VERSION ${PROJECT_VERSION}
