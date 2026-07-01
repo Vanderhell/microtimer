@@ -156,6 +156,7 @@ static int test_periodic_exact_and_single_fire_per_tick(void)
 static int test_wraparound_and_pause_resume(void)
 {
     mtimer_t tm;
+    int pause_id;
     uint32_t remaining = 0u;
 
     mock_time_a = UINT32_MAX - 3u;
@@ -168,13 +169,14 @@ static int test_wraparound_and_pause_resume(void)
     TEST_ASSERT_EQ(1, mtimer_tick(&tm));
 
     mock_time_a = 100u;
-    TEST_ASSERT_EQ(0, mtimer_create(&tm, "pause", 20u, MTIMER_ONESHOT, log_fire, NULL));
-    TEST_ASSERT_EQ(MTIMER_OK, mtimer_start(&tm, 1u));
+    pause_id = mtimer_create(&tm, "pause", 20u, MTIMER_ONESHOT, log_fire, NULL);
+    TEST_ASSERT_EQ(1, pause_id);
+    TEST_ASSERT_EQ(MTIMER_OK, mtimer_start(&tm, (uint8_t)pause_id));
     mock_time_a += 20u;
-    TEST_ASSERT_EQ(MTIMER_OK, mtimer_pause(&tm, 1u));
-    TEST_ASSERT_EQ(MTIMER_OK, mtimer_get_remaining(&tm, 1u, &remaining));
+    TEST_ASSERT_EQ(MTIMER_OK, mtimer_pause(&tm, (uint8_t)pause_id));
+    TEST_ASSERT_EQ(MTIMER_OK, mtimer_get_remaining(&tm, (uint8_t)pause_id, &remaining));
     TEST_ASSERT_EQ(0u, remaining);
-    TEST_ASSERT_EQ(MTIMER_OK, mtimer_resume(&tm, 1u));
+    TEST_ASSERT_EQ(MTIMER_OK, mtimer_resume(&tm, (uint8_t)pause_id));
     TEST_ASSERT_EQ(1, mtimer_tick(&tm));
     return 0;
 }
