@@ -1,0 +1,31 @@
+/*
+ * microtimer resolved configuration.
+ *
+ * This checked-in header is the default source-tree configuration.
+ * CMake generates a resolved replacement for build and install trees.
+ */
+
+#ifndef MTIMER_CONFIG_H
+#define MTIMER_CONFIG_H
+
+#define MTIMER_CONFIG_RESOLVED_MAX_TIMERS 8
+
+#if defined(MTIMER_MAX_TIMERS) && (MTIMER_MAX_TIMERS != MTIMER_CONFIG_RESOLVED_MAX_TIMERS)
+#error "microtimer: MTIMER_MAX_TIMERS conflicts with resolved mtimer_config.h"
+#endif
+
+#undef MTIMER_MAX_TIMERS
+#define MTIMER_MAX_TIMERS MTIMER_CONFIG_RESOLVED_MAX_TIMERS
+
+#if (MTIMER_MAX_TIMERS < 1)
+#error "microtimer: MTIMER_MAX_TIMERS must be >= 1"
+#endif
+
+#if (MTIMER_MAX_TIMERS > 255)
+#error "microtimer: MTIMER_MAX_TIMERS must be <= 255 with uint8_t ids"
+#endif
+
+typedef char mtimer_config_assert_max_timers_range[
+    (MTIMER_MAX_TIMERS >= 1 && MTIMER_MAX_TIMERS <= 255) ? 1 : -1];
+
+#endif /* MTIMER_CONFIG_H */

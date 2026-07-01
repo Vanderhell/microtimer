@@ -1,277 +1,509 @@
 /*
- * microtimer — Implementation.
+ * microtimer - Implementation.
  *
  * SPDX-License-Identifier: MIT
  * https://github.com/Vanderhell/microtimer
  */
 
 #include "mtimer.h"
+
 #include <string.h>
 
-/* ── Strings ───────────────────────────────────────────────────────────── */
+static uint32_t mtimer_elapsed(uint32_t from, uint32_t now)
+{
+    return now - from;
+}
+
+static int mtimer_mode_is_valid(mtimer_mode_t mode)
+{
+    return mode == MTIMER_ONESHOT || mode == MTIMER_PERIODIC;
+}
+
+static int mtimer_state_is_valid_storage(uint8_t state)
+{
+    return state == (uint8_t)MTIMER_STOPPED ||
+           state == (uint8_t)MTIMER_RUNNING ||
+           state == (uint8_t)MTIMER_PAUSED;
+}
+
+static mtimer_state_t mtimer_state_from_storage(uint8_t state)
+{
+    if (state == (uint8_t)MTIMER_RUNNING) {
+        return MTIMER_RUNNING;
+    }
+    if (state == (uint8_t)MTIMER_PAUSED) {
+        return MTIMER_PAUSED;
+    }
+    return MTIMER_STOPPED;
+}
+
+static int mtimer_valid_id(const mtimer_t *tm, uint8_t id)
+{
+    return id < MTIMER_MAX_TIMERS && tm->timers[id].allocated != 0u;
+}
+
+static int mtimer_manager_busy(const mtimer_t *tm)
+{
+    return tm->active_tick != 0u;
+}
+
+static int mtimer_name_exists(const mtimer_t *tm, const char *name)
+{
+    int i;
+
+    if (name == NULL) {
+        return 0;
+    }
+
+    for (i = 0; i < MTIMER_MAX_TIMERS; ++i) {
+        if (tm->timers[i].allocated != 0u &&
+            tm->timers[i].name != NULL &&
+            strcmp(tm->timers[i].name, name) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
 
 const char *mtimer_err_str(mtimer_err_t err)
 {
     switch (err) {
-    case MTIMER_OK:            return "ok";
-    case MTIMER_ERR_NULL:      return "null pointer";
-    case MTIMER_ERR_FULL:      return "timer table full";
-    case MTIMER_ERR_NOT_FOUND: return "timer not found";
-    case MTIMER_ERR_INVALID:   return "invalid config";
-    default:                   return "unknown error";
+    case MTIMER_OK:
+        return "ok";
+    case MTIMER_ERR_NULL:
+        return "null pointer";
+    case MTIMER_ERR_FULL:
+        return "timer table full";
+    case MTIMER_ERR_NOT_FOUND:
+        return "timer not found";
+    case MTIMER_ERR_INVALID:
+        return "invalid argument";
+    case MTIMER_ERR_BUSY:
+        return "manager busy";
+    case MTIMER_ERR_ABI:
+        return "abi/config mismatch";
+    default:
+        return "unknown error";
     }
 }
 
 const char *mtimer_state_str(mtimer_state_t state)
 {
     switch (state) {
-    case MTIMER_STOPPED: return "STOPPED";
-    case MTIMER_RUNNING: return "RUNNING";
-    case MTIMER_PAUSED:  return "PAUSED";
-    default:             return "?";
+    case MTIMER_STOPPED:
+        return "STOPPED";
+    case MTIMER_RUNNING:
+        return "RUNNING";
+    case MTIMER_PAUSED:
+        return "PAUSED";
+    default:
+        return "?";
     }
 }
 
-/* ── Helpers ───────────────────────────────────────────────────────────── */
-
-static inline uint32_t elapsed(uint32_t from, uint32_t now)
+mtimer_err_t mtimer_init_sized(mtimer_t *tm, size_t tm_size, mtimer_clock_fn clock)
 {
-    return now - from;
-}
+    if (tm == NULL || clock == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+    if (tm_size != sizeof(*tm)) {
+        return MTIMER_ERR_ABI;
+    }
+    if (mtimer_manager_busy(tm)) {
+        return MTIMER_ERR_BUSY;
+    }
 
-static bool valid_id(const mtimer_t *tm, uint8_t id)
-{
-    return id < MTIMER_MAX_TIMERS && tm->timers[id].allocated;
-}
-
-/* ── Init ──────────────────────────────────────────────────────────────── */
-
-mtimer_err_t mtimer_init(mtimer_t *tm, mtimer_clock_fn clock)
-{
-    if (tm == NULL || clock == NULL) return MTIMER_ERR_NULL;
     memset(tm, 0, sizeof(*tm));
     tm->clock = clock;
     return MTIMER_OK;
 }
 
-/* ── Create / Destroy ──────────────────────────────────────────────────── */
-
-int mtimer_create(mtimer_t *tm, const char *name, uint32_t interval_ms,
-                   mtimer_mode_t mode, mtimer_cb_fn callback, void *ctx)
+int mtimer_create(
+    mtimer_t *tm,
+    const char *name,
+    uint32_t interval_ms,
+    mtimer_mode_t mode,
+    mtimer_cb_fn callback,
+    void *ctx)
 {
-    if (tm == NULL || callback == NULL) return MTIMER_ERR_NULL;
-    if (interval_ms == 0) return MTIMER_ERR_INVALID;
+    int i;
 
-    /* Find free slot */
-    int idx = -1;
-    for (int i = 0; i < MTIMER_MAX_TIMERS; i++) {
-        if (!tm->timers[i].allocated) {
-            idx = i;
-            break;
-        }
+    if (tm == NULL || callback == NULL) {
+        return MTIMER_ERR_NULL;
     }
-    if (idx < 0) return MTIMER_ERR_FULL;
+    if (mtimer_manager_busy(tm)) {
+        return MTIMER_ERR_BUSY;
+    }
+    if (interval_ms == 0u || !mtimer_mode_is_valid(mode)) {
+        return MTIMER_ERR_INVALID;
+    }
+    if (mtimer_name_exists(tm, name)) {
+        return MTIMER_ERR_INVALID;
+    }
 
-    mtimer_entry_t *t = &tm->timers[idx];
-    memset(t, 0, sizeof(*t));
-    t->name        = name;
-    t->interval_ms = interval_ms;
-    t->mode        = mode;
-    t->callback    = callback;
-    t->ctx         = ctx;
-    t->state       = MTIMER_STOPPED;
-    t->allocated   = true;
+    for (i = 0; i < MTIMER_MAX_TIMERS; ++i) {
+        mtimer_entry_t *timer;
 
-    return idx;
+        if (tm->timers[i].allocated != 0u) {
+            continue;
+        }
+
+        timer = &tm->timers[i];
+        memset(timer, 0, sizeof(*timer));
+        timer->name = name;
+        timer->interval_ms = interval_ms;
+        timer->callback = callback;
+        timer->ctx = ctx;
+        timer->mode_storage = (uint8_t)mode;
+        timer->state_storage = (uint8_t)MTIMER_STOPPED;
+        timer->allocated = 1u;
+        return i;
+    }
+
+    return MTIMER_ERR_FULL;
 }
 
 mtimer_err_t mtimer_destroy(mtimer_t *tm, uint8_t id)
 {
-    if (tm == NULL) return MTIMER_ERR_NULL;
-    if (!valid_id(tm, id)) return MTIMER_ERR_NOT_FOUND;
+    if (tm == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+    if (mtimer_manager_busy(tm)) {
+        return MTIMER_ERR_BUSY;
+    }
+    if (!mtimer_valid_id(tm, id)) {
+        return MTIMER_ERR_NOT_FOUND;
+    }
 
-    memset(&tm->timers[id], 0, sizeof(mtimer_entry_t));
+    memset(&tm->timers[id], 0, sizeof(tm->timers[id]));
     return MTIMER_OK;
 }
 
-/* ── Control ───────────────────────────────────────────────────────────── */
-
 mtimer_err_t mtimer_start(mtimer_t *tm, uint8_t id)
 {
-    if (tm == NULL) return MTIMER_ERR_NULL;
-    if (!valid_id(tm, id)) return MTIMER_ERR_NOT_FOUND;
+    mtimer_entry_t *timer;
 
-    mtimer_entry_t *t = &tm->timers[id];
-    t->state    = MTIMER_RUNNING;
-    t->start_ms = tm->clock();
+    if (tm == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+    if (mtimer_manager_busy(tm)) {
+        return MTIMER_ERR_BUSY;
+    }
+    if (!mtimer_valid_id(tm, id)) {
+        return MTIMER_ERR_NOT_FOUND;
+    }
 
+    timer = &tm->timers[id];
+    timer->start_ms = tm->clock();
+    timer->remaining_ms = 0u;
+    timer->state_storage = (uint8_t)MTIMER_RUNNING;
     return MTIMER_OK;
 }
 
 mtimer_err_t mtimer_stop(mtimer_t *tm, uint8_t id)
 {
-    if (tm == NULL) return MTIMER_ERR_NULL;
-    if (!valid_id(tm, id)) return MTIMER_ERR_NOT_FOUND;
+    mtimer_entry_t *timer;
 
-    tm->timers[id].state = MTIMER_STOPPED;
+    if (tm == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+    if (mtimer_manager_busy(tm)) {
+        return MTIMER_ERR_BUSY;
+    }
+    if (!mtimer_valid_id(tm, id)) {
+        return MTIMER_ERR_NOT_FOUND;
+    }
+
+    timer = &tm->timers[id];
+    timer->state_storage = (uint8_t)MTIMER_STOPPED;
+    timer->remaining_ms = 0u;
     return MTIMER_OK;
 }
 
 mtimer_err_t mtimer_pause(mtimer_t *tm, uint8_t id)
 {
-    if (tm == NULL) return MTIMER_ERR_NULL;
-    if (!valid_id(tm, id)) return MTIMER_ERR_NOT_FOUND;
+    mtimer_entry_t *timer;
+    uint32_t elapsed_ms;
 
-    mtimer_entry_t *t = &tm->timers[id];
-    if (t->state != MTIMER_RUNNING) return MTIMER_ERR_INVALID;
-
-    uint32_t el = elapsed(t->start_ms, tm->clock());
-    if (el >= t->interval_ms) {
-        t->remaining_ms = 0;
-    } else {
-        t->remaining_ms = t->interval_ms - el;
+    if (tm == NULL) {
+        return MTIMER_ERR_NULL;
     }
-    t->state = MTIMER_PAUSED;
+    if (mtimer_manager_busy(tm)) {
+        return MTIMER_ERR_BUSY;
+    }
+    if (!mtimer_valid_id(tm, id)) {
+        return MTIMER_ERR_NOT_FOUND;
+    }
 
+    timer = &tm->timers[id];
+    if (timer->state_storage != (uint8_t)MTIMER_RUNNING) {
+        return MTIMER_ERR_INVALID;
+    }
+
+    elapsed_ms = mtimer_elapsed(timer->start_ms, tm->clock());
+    if (elapsed_ms >= timer->interval_ms) {
+        timer->remaining_ms = 0u;
+    } else {
+        timer->remaining_ms = timer->interval_ms - elapsed_ms;
+    }
+    timer->state_storage = (uint8_t)MTIMER_PAUSED;
     return MTIMER_OK;
 }
 
 mtimer_err_t mtimer_resume(mtimer_t *tm, uint8_t id)
 {
-    if (tm == NULL) return MTIMER_ERR_NULL;
-    if (!valid_id(tm, id)) return MTIMER_ERR_NOT_FOUND;
+    mtimer_entry_t *timer;
+    uint32_t now;
 
-    mtimer_entry_t *t = &tm->timers[id];
-    if (t->state != MTIMER_PAUSED) return MTIMER_ERR_INVALID;
+    if (tm == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+    if (mtimer_manager_busy(tm)) {
+        return MTIMER_ERR_BUSY;
+    }
+    if (!mtimer_valid_id(tm, id)) {
+        return MTIMER_ERR_NOT_FOUND;
+    }
 
-    /* Set start_ms so that (now - start_ms) = (interval - remaining) */
-    uint32_t now = tm->clock();
-    t->start_ms = now - (t->interval_ms - t->remaining_ms);
-    t->state = MTIMER_RUNNING;
+    timer = &tm->timers[id];
+    if (timer->state_storage != (uint8_t)MTIMER_PAUSED) {
+        return MTIMER_ERR_INVALID;
+    }
 
+    now = tm->clock();
+    if (timer->remaining_ms == 0u) {
+        timer->start_ms = now - timer->interval_ms;
+    } else {
+        timer->start_ms = now - (timer->interval_ms - timer->remaining_ms);
+    }
+    timer->state_storage = (uint8_t)MTIMER_RUNNING;
     return MTIMER_OK;
 }
 
 mtimer_err_t mtimer_set_interval(mtimer_t *tm, uint8_t id, uint32_t interval_ms)
 {
-    if (tm == NULL) return MTIMER_ERR_NULL;
-    if (!valid_id(tm, id)) return MTIMER_ERR_NOT_FOUND;
-    if (interval_ms == 0) return MTIMER_ERR_INVALID;
+    mtimer_entry_t *timer;
 
-    mtimer_entry_t *t = &tm->timers[id];
-    t->interval_ms = interval_ms;
+    if (tm == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+    if (mtimer_manager_busy(tm)) {
+        return MTIMER_ERR_BUSY;
+    }
+    if (!mtimer_valid_id(tm, id)) {
+        return MTIMER_ERR_NOT_FOUND;
+    }
+    if (interval_ms == 0u) {
+        return MTIMER_ERR_INVALID;
+    }
 
-    /* Restart if running */
-    if (t->state == MTIMER_RUNNING) {
-        t->start_ms = tm->clock();
+    timer = &tm->timers[id];
+    timer->interval_ms = interval_ms;
+
+    if (timer->state_storage == (uint8_t)MTIMER_RUNNING) {
+        timer->start_ms = tm->clock();
+        timer->remaining_ms = 0u;
+    } else if (timer->state_storage == (uint8_t)MTIMER_PAUSED) {
+        timer->remaining_ms = interval_ms;
+    } else {
+        timer->remaining_ms = 0u;
     }
 
     return MTIMER_OK;
 }
 
-/* ── Tick ──────────────────────────────────────────────────────────────── */
-
 int mtimer_tick(mtimer_t *tm)
 {
-    if (tm == NULL || tm->clock == NULL) return 0;
+    uint32_t now;
+    int fired;
+    int i;
 
-    uint32_t now = tm->clock();
-    int fired = 0;
+    if (tm == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+    if (tm->clock == NULL) {
+        return MTIMER_ERR_INVALID;
+    }
+    if (mtimer_manager_busy(tm)) {
+        return MTIMER_ERR_BUSY;
+    }
 
-    for (int i = 0; i < MTIMER_MAX_TIMERS; i++) {
-        mtimer_entry_t *t = &tm->timers[i];
-        if (!t->allocated || t->state != MTIMER_RUNNING) continue;
+    tm->active_tick = 1u;
+    now = tm->clock();
+    fired = 0;
 
-        uint32_t el = elapsed(t->start_ms, now);
-        if (el < t->interval_ms) continue;
+    for (i = 0; i < MTIMER_MAX_TIMERS; ++i) {
+        mtimer_entry_t *timer;
+        uint32_t elapsed_ms;
+        uint32_t intervals_elapsed;
+        mtimer_cb_fn callback;
+        void *ctx;
 
-        /* Timer expired! */
-        t->fire_count++;
+        timer = &tm->timers[i];
+        if (timer->allocated == 0u || timer->state_storage != (uint8_t)MTIMER_RUNNING) {
+            continue;
+        }
+
+        elapsed_ms = mtimer_elapsed(timer->start_ms, now);
+        if (elapsed_ms < timer->interval_ms) {
+            continue;
+        }
+
+        callback = timer->callback;
+        ctx = timer->ctx;
+
+        timer->fire_count++;
         tm->fire_count++;
         fired++;
 
-        t->callback((uint8_t)i, t->ctx);
-
-        /* Oneshot → stop, Periodic → restart */
-        if (t->mode == MTIMER_ONESHOT) {
-            t->state = MTIMER_STOPPED;
+        if (timer->mode_storage == (uint8_t)MTIMER_ONESHOT) {
+            timer->state_storage = (uint8_t)MTIMER_STOPPED;
+            timer->remaining_ms = 0u;
         } else {
-            /* Anchor next period to avoid drift */
-            t->start_ms += t->interval_ms;
-            /* If we're way behind, snap to now */
-            if (elapsed(t->start_ms, now) >= t->interval_ms) {
-                t->start_ms = now;
-            }
+            intervals_elapsed = elapsed_ms / timer->interval_ms;
+            timer->start_ms += intervals_elapsed * timer->interval_ms;
+            timer->remaining_ms = 0u;
         }
+
+        callback((uint8_t)i, ctx);
     }
 
+    tm->active_tick = 0u;
     tm->tick_count++;
     return fired;
 }
 
-/* ── Query ─────────────────────────────────────────────────────────────── */
-
-uint8_t mtimer_count(const mtimer_t *tm)
+mtimer_err_t mtimer_get_count(const mtimer_t *tm, uint8_t *out_count)
 {
-    if (tm == NULL) return 0;
-    uint8_t n = 0;
-    for (int i = 0; i < MTIMER_MAX_TIMERS; i++) {
-        if (tm->timers[i].allocated) n++;
+    int i;
+    uint8_t count;
+
+    if (tm == NULL || out_count == NULL) {
+        return MTIMER_ERR_NULL;
     }
-    return n;
+
+    count = 0u;
+    for (i = 0; i < MTIMER_MAX_TIMERS; ++i) {
+        if (tm->timers[i].allocated != 0u) {
+            count++;
+        }
+    }
+
+    *out_count = count;
+    return MTIMER_OK;
 }
 
 const mtimer_entry_t *mtimer_at(const mtimer_t *tm, uint8_t id)
 {
-    if (tm == NULL || !valid_id(tm, id)) return NULL;
+    if (tm == NULL || !mtimer_valid_id(tm, id)) {
+        return NULL;
+    }
     return &tm->timers[id];
 }
 
 int mtimer_find(const mtimer_t *tm, const char *name)
 {
-    if (tm == NULL || name == NULL) return -1;
-    for (int i = 0; i < MTIMER_MAX_TIMERS; i++) {
-        if (tm->timers[i].allocated && tm->timers[i].name != NULL &&
+    int i;
+
+    if (tm == NULL || name == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+
+    for (i = 0; i < MTIMER_MAX_TIMERS; ++i) {
+        if (tm->timers[i].allocated != 0u &&
+            tm->timers[i].name != NULL &&
             strcmp(tm->timers[i].name, name) == 0) {
             return i;
         }
     }
-    return -1;
+
+    return MTIMER_ERR_NOT_FOUND;
 }
 
-mtimer_state_t mtimer_state(const mtimer_t *tm, uint8_t id)
+mtimer_err_t mtimer_get_state(const mtimer_t *tm, uint8_t id, mtimer_state_t *out_state)
 {
-    if (tm == NULL || !valid_id(tm, id)) return MTIMER_STOPPED;
-    return tm->timers[id].state;
+    const mtimer_entry_t *timer;
+
+    if (tm == NULL || out_state == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+    if (!mtimer_valid_id(tm, id)) {
+        return MTIMER_ERR_NOT_FOUND;
+    }
+
+    timer = &tm->timers[id];
+    if (!mtimer_state_is_valid_storage(timer->state_storage)) {
+        return MTIMER_ERR_INVALID;
+    }
+
+    *out_state = mtimer_state_from_storage(timer->state_storage);
+    return MTIMER_OK;
 }
 
-uint32_t mtimer_remaining(const mtimer_t *tm, uint8_t id)
+mtimer_err_t mtimer_get_remaining(const mtimer_t *tm, uint8_t id, uint32_t *out_remaining_ms)
 {
-    if (tm == NULL || !valid_id(tm, id)) return 0;
-    const mtimer_entry_t *t = &tm->timers[id];
+    const mtimer_entry_t *timer;
+    uint32_t elapsed_ms;
 
-    if (t->state == MTIMER_PAUSED) return t->remaining_ms;
-    if (t->state != MTIMER_RUNNING) return 0;
+    if (tm == NULL || out_remaining_ms == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+    if (!mtimer_valid_id(tm, id)) {
+        return MTIMER_ERR_NOT_FOUND;
+    }
 
-    uint32_t el = elapsed(t->start_ms, tm->clock());
-    if (el >= t->interval_ms) return 0;
-    return t->interval_ms - el;
+    timer = &tm->timers[id];
+    if (timer->state_storage == (uint8_t)MTIMER_PAUSED) {
+        *out_remaining_ms = timer->remaining_ms;
+        return MTIMER_OK;
+    }
+    if (timer->state_storage == (uint8_t)MTIMER_STOPPED) {
+        *out_remaining_ms = 0u;
+        return MTIMER_OK;
+    }
+    if (timer->state_storage != (uint8_t)MTIMER_RUNNING) {
+        return MTIMER_ERR_INVALID;
+    }
+
+    elapsed_ms = mtimer_elapsed(timer->start_ms, tm->clock());
+    if (elapsed_ms >= timer->interval_ms) {
+        *out_remaining_ms = 0u;
+    } else {
+        *out_remaining_ms = timer->interval_ms - elapsed_ms;
+    }
+    return MTIMER_OK;
 }
 
-uint32_t mtimer_fire_count(const mtimer_t *tm, uint8_t id)
+mtimer_err_t mtimer_get_fire_count(const mtimer_t *tm, uint8_t id, uint32_t *out_fire_count)
 {
-    if (tm == NULL || !valid_id(tm, id)) return 0;
-    return tm->timers[id].fire_count;
+    if (tm == NULL || out_fire_count == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+    if (!mtimer_valid_id(tm, id)) {
+        return MTIMER_ERR_NOT_FOUND;
+    }
+
+    *out_fire_count = tm->timers[id].fire_count;
+    return MTIMER_OK;
 }
 
-uint32_t mtimer_total_fires(const mtimer_t *tm)
+mtimer_err_t mtimer_get_total_fires(const mtimer_t *tm, uint32_t *out_total_fires)
 {
-    if (tm == NULL) return 0;
-    return tm->fire_count;
+    if (tm == NULL || out_total_fires == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+
+    *out_total_fires = tm->fire_count;
+    return MTIMER_OK;
 }
 
-uint32_t mtimer_total_ticks(const mtimer_t *tm)
+mtimer_err_t mtimer_get_total_ticks(const mtimer_t *tm, uint32_t *out_total_ticks)
 {
-    if (tm == NULL) return 0;
-    return tm->tick_count;
+    if (tm == NULL || out_total_ticks == NULL) {
+        return MTIMER_ERR_NULL;
+    }
+
+    *out_total_ticks = tm->tick_count;
+    return MTIMER_OK;
 }
