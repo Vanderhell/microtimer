@@ -1,0 +1,14 @@
+add_executable(microtimer_tests test_all.c)
+target_link_libraries(microtimer_tests PRIVATE microtimer)
+target_compile_features(microtimer_tests PRIVATE c_std_99)
+add_test(NAME microtimer_tests COMMAND microtimer_tests)
+
+add_executable(microtimer_c_consumer consumers/c_consumer.c)
+target_link_libraries(microtimer_c_consumer PRIVATE microtimer)
+target_compile_features(microtimer_c_consumer PRIVATE c_std_99)
+
+add_executable(microtimer_cpp_consumer consumers/cpp_consumer.cpp)
+target_link_libraries(microtimer_cpp_consumer PRIVATE microtimer)
+set_target_properties(microtimer_cpp_consumer PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED YES)
+
+add_subdirectory(compile_fail)
