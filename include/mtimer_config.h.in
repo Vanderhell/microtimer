@@ -3,22 +3,30 @@
 
 #define MTIMER_CONFIG_RESOLVED_MAX_TIMERS @MICROTIMER_MAX_TIMERS@
 
-#if defined(MTIMER_MAX_TIMERS) && (MTIMER_MAX_TIMERS != MTIMER_CONFIG_RESOLVED_MAX_TIMERS)
+#if defined(MTIMER_MAX_TIMERS)
+#define MTIMER_CONFIG_REQUESTED_MAX_TIMERS MTIMER_MAX_TIMERS
+#else
+#define MTIMER_CONFIG_REQUESTED_MAX_TIMERS MTIMER_CONFIG_RESOLVED_MAX_TIMERS
+#endif
+
+#if (MTIMER_CONFIG_REQUESTED_MAX_TIMERS < 1)
+#error "microtimer: MTIMER_MAX_TIMERS must be >= 1"
+#endif
+
+#if (MTIMER_CONFIG_REQUESTED_MAX_TIMERS > 255)
+#error "microtimer: MTIMER_MAX_TIMERS must be <= 255 with uint8_t ids"
+#endif
+
+#if defined(MTIMER_MAX_TIMERS) && (MTIMER_CONFIG_REQUESTED_MAX_TIMERS != MTIMER_CONFIG_RESOLVED_MAX_TIMERS)
 #error "microtimer: MTIMER_MAX_TIMERS conflicts with resolved mtimer_config.h"
 #endif
 
 #undef MTIMER_MAX_TIMERS
 #define MTIMER_MAX_TIMERS MTIMER_CONFIG_RESOLVED_MAX_TIMERS
 
-#if (MTIMER_MAX_TIMERS < 1)
-#error "microtimer: MTIMER_MAX_TIMERS must be >= 1"
-#endif
-
-#if (MTIMER_MAX_TIMERS > 255)
-#error "microtimer: MTIMER_MAX_TIMERS must be <= 255 with uint8_t ids"
-#endif
-
 typedef char mtimer_config_assert_max_timers_range[
     (MTIMER_MAX_TIMERS >= 1 && MTIMER_MAX_TIMERS <= 255) ? 1 : -1];
+
+#undef MTIMER_CONFIG_REQUESTED_MAX_TIMERS
 
 #endif /* MTIMER_CONFIG_H */

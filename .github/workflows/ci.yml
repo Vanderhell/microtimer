@@ -66,15 +66,21 @@ jobs:
         run: cppcheck --enable=warning,style,performance --error-exitcode=1 include src tests
 
   windows-msvc:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
-      - name: Configure
-        run: cmake -S . -B build -DMICROTIMER_BUILD_TESTS=ON -G "Visual Studio 17 2022" -A x64 -DCMAKE_C_FLAGS="/W4 /WX"
-      - name: Build
-        run: cmake --build build --config Release
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Configure, build, and test with MSVC
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $installationPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installationPath) {
+            throw "No Visual Studio installation with MSVC tools was found."
+          }
+
+          $devCmd = Join-Path $installationPath "Common7\Tools\VsDevCmd.bat"
+          $command = "`"$devCmd`" -arch=x64 && cmake -S . -B build -G Ninja -DMICROTIMER_BUILD_TESTS=ON -DCMAKE_C_COMPILER=cl -DCMAKE_C_FLAGS=/W4\ /WX && cmake --build build && ctest --test-dir build --output-on-failure"
+          cmd /c $command
 
   install-consumers:
     runs-on: ubuntu-latest
