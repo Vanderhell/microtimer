@@ -110,9 +110,6 @@ mtimer_err_t mtimer_init_sized(mtimer_t *tm, size_t tm_size, mtimer_clock_fn clo
     if (tm_size != sizeof(*tm)) {
         return MTIMER_ERR_ABI;
     }
-    if (mtimer_manager_busy(tm)) {
-        return MTIMER_ERR_BUSY;
-    }
 
     memset(tm, 0, sizeof(*tm));
     tm->clock = clock;
