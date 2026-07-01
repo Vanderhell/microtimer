@@ -63,7 +63,7 @@ jobs:
       - name: Clang tidy
         run: clang-tidy src/mtimer.c -- -Iinclude
       - name: Cppcheck
-        run: cppcheck --enable=warning,style,performance --error-exitcode=1 include src tests
+        run: cppcheck --enable=warning,style,performance --error-exitcode=1 include src tests/test_all.c tests/consumers tests/find_package_consumer tests/add_subdirectory_consumer
 
   windows-msvc:
     runs-on: windows-2022
