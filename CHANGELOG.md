@@ -1,13 +1,14 @@
-﻿# Changelog
+# Changelog
 
-## [1.0.0] - 2026-03-21
+## [Unreleased]
 
-### Added
-- Oneshot and periodic software timers.
-- Drift-corrected periodic timing.
-- Pause/resume with remaining-time preservation.
-- Dynamic interval change.
-- Slot reuse via destroy/create.
-- Named timer lookup.
-- Per-timer and global fire counters.
-- 25 tests (69 assertions) using the microtest framework.
+### Changed
+- Hardened configuration validation and ABI mismatch handling.
+- Replaced ambiguous query APIs with status-plus-output contracts.
+- Defined wraparound timing, pause/resume, periodic missed-period, and callback busy semantics.
+- Added CMake package support, generated configuration headers, and tracked consumer fixtures.
+- Replaced the network-dependent test harness with repository-local tests and compile-fail coverage.
+- Expanded repository documentation, verification notes, and tag-driven release workflow.
+
+### Notes
+- No release tags are present in the local repository snapshot, so no released version is asserted here.
