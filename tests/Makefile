@@ -1,14 +1,19 @@
-CC      ?= gcc
-CFLAGS  := -std=c99 -Wall -Wextra -Wpedantic -Werror -I../include -I../../microtest/include
-SRC     := ../src/mtimer.c
+CC ?= cc
+CSTD ?= -std=c99
+WARN_CFLAGS ?= -Wall -Wextra -Wpedantic -Werror
+CPPFLAGS ?=
+CFLAGS ?=
+LDFLAGS ?=
+LDLIBS ?=
+SRC := ../src/mtimer.c
 
 .PHONY: all clean
 
 all: test_all
-	@./test_all
+	./test_all
 
-test_all: test_all.c $(SRC) ../include/mtimer.h
-	$(CC) $(CFLAGS) $(SRC) test_all.c -lm -o $@
+test_all: test_all.c test_harness.h $(SRC) ../include/mtimer.h ../include/mtimer_config.h
+	$(CC) $(CPPFLAGS) -I../include $(CSTD) $(WARN_CFLAGS) $(CFLAGS) $(SRC) test_all.c $(LDFLAGS) $(LDLIBS) -o $@
 
 clean:
-	rm -f test_all
+	$(RM) test_all test_all.exe
