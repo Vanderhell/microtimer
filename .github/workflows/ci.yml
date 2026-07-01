@@ -7,20 +7,98 @@ on:
     branches: [master]
 
 jobs:
-  test:
-    name: Build and Test (${{ matrix.cc }})
+  linux:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        cc: [gcc, clang]
-
+        include:
+          - cc: gcc
+            c_standard: 99
+          - cc: gcc
+            c_standard: 11
+          - cc: clang
+            c_standard: 99
+          - cc: clang
+            c_standard: 11
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - name: Configure
+        run: cmake -S . -B build -DMICROTIMER_BUILD_TESTS=ON -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCMAKE_C_STANDARD=${{ matrix.c_standard }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
 
-      - name: Clone microtest dependency
-        run: git clone --depth 1 https://github.com/Vanderhell/microtest.git ../microtest
+  linux-sanitizers:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize:
+          - address
+          - undefined
+          - address,undefined
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - name: Configure
+        run: cmake -S . -B build -DMICROTIMER_BUILD_TESTS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_C_FLAGS="-fsanitize=${{ matrix.sanitize }} -fno-omit-frame-pointer"
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
 
-      - name: Build and run tests
-        run: make -C tests CC=${{ matrix.cc }}
+  linux-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - name: Install optional tools
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy cppcheck clang-tools
+      - name: Strict configure
+        run: cmake -S . -B build -DMICROTIMER_BUILD_TESTS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_C_FLAGS="-Wconversion -Wsign-conversion -fshort-enums"
+      - name: Build
+        run: cmake --build build
+      - name: Clang static analyzer
+        run: scan-build --status-bugs cmake --build build
+      - name: Clang tidy
+        run: clang-tidy src/mtimer.c -- -Iinclude
+      - name: Cppcheck
+        run: cppcheck --enable=warning,style,performance --error-exitcode=1 include src tests
+
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - name: Configure
+        run: cmake -S . -B build -DMICROTIMER_BUILD_TESTS=ON -G "Visual Studio 17 2022" -A x64 -DCMAKE_C_FLAGS="/W4 /WX"
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  install-consumers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - name: Install package
+        run: cmake -S . -B build -DCMAKE_INSTALL_PREFIX="$PWD/stage" && cmake --build build && cmake --install build
+      - name: find_package consumer
+        run: cmake -S tests/find_package_consumer -B build-find -DCMAKE_PREFIX_PATH="$PWD/stage" && cmake --build build-find
+      - name: add_subdirectory consumer
+        run: cmake -S tests/add_subdirectory_consumer -B build-subdir && cmake --build build-subdir
+
+  arm-cross:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu:
+          - cortex-m0
+          - cortex-m0plus
+          - cortex-m4
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - name: Install ARM toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+      - name: Compile only
+        run: arm-none-eabi-gcc -std=c99 -Wall -Wextra -Werror -mcpu=${{ matrix.cpu }} -mthumb -Iinclude -c src/mtimer.c -o mtimer-${{ matrix.cpu }}.o
