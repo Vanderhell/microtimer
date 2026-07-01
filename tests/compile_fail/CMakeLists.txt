@@ -15,7 +15,7 @@ function(microtimer_add_compile_fail_test name source regex)
     endif()
 
     string(REGEX MATCH "${regex}" ${name}_MATCH "${${name}_OUTPUT}")
-    if(NOT "${${name}_MATCH}")
+    if("${${name}_MATCH}" STREQUAL "")
         message(FATAL_ERROR "compile-fail test '${name}' did not emit expected diagnostic")
     endif()
 endfunction()
