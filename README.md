@@ -1,97 +1,107 @@
-﻿# microtimer
+# microtimer
 
 [![CI](https://github.com/Vanderhell/microtimer/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/Vanderhell/microtimer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![C Standard](https://img.shields.io/badge/C-C99-blue.svg)](https://en.wikipedia.org/wiki/C99)
 
-Software timer manager for embedded systems.
+`microtimer` is a fixed-capacity software timer manager for C99 projects.
 
-C99 | Zero dependencies | Zero allocations | Oneshot + Periodic | Portable
+It targets serialized access to one manager from one execution context by default. It does not provide heap allocation, hidden locks, persistence, or general ISR/thread safety.
 
-## Why microtimer?
+## Support Scope
 
-Embedded main loops often contain repeated timing checks:
+- C99 and C11 consumers
+- C++ header consumption
+- GCC, Clang, and MSVC builds
+- Main-loop usage
+- ISR-owned usage with strict limits
+- External synchronization around shared access
+- ARM Cortex-M compile-only verification
+- CMake `find_package()` and `add_subdirectory()` consumers
+
+## Quick Start
 
 ```c
-if (now - last_blink > 500) { toggle_led(); last_blink = now; }
-if (now - last_send > 5000) { send_telemetry(); last_send = now; }
-if (now - last_check > 1000) { check_sensors(); last_check = now; }
-```
+#include "mtimer.h"
 
-`microtimer` replaces this with registered timers and a single tick path:
+static uint32_t app_clock_ms(void) { return platform_millis(); }
 
-```c
-mtimer_create(&tm, "blink",   500,  MTIMER_PERIODIC, on_blink, NULL);
-mtimer_create(&tm, "send",    5000, MTIMER_PERIODIC, on_send, NULL);
-mtimer_create(&tm, "timeout", 3000, MTIMER_ONESHOT,  on_timeout, NULL);
+static void blink_cb(uint8_t id, void *ctx)
+{
+    (void)id;
+    *(volatile int *)ctx = 1;
+}
 
-while (1) {
-    mtimer_tick(&tm);
+int main(void)
+{
+    mtimer_t tm;
+    volatile int blink_due = 0;
+    int timer_id;
+
+    if (mtimer_init(&tm, app_clock_ms) != MTIMER_OK) {
+        return 1;
+    }
+
+    timer_id = mtimer_create(&tm, "blink", 500u, MTIMER_PERIODIC, blink_cb, (void *)&blink_due);
+    if (timer_id < 0) {
+        return 1;
+    }
+
+    if (mtimer_start(&tm, (uint8_t)timer_id) != MTIMER_OK) {
+        return 1;
+    }
+
+    for (;;) {
+        int tick_rc = mtimer_tick(&tm);
+        if (tick_rc < 0) {
+            return 1;
+        }
+        if (blink_due) {
+            blink_due = 0;
+            toggle_led();
+        }
+    }
 }
 ```
 
-## Features
+## Key Contracts
 
-- Oneshot timers that auto-stop after firing.
-- Periodic timers with drift correction.
-- Pause/resume with remaining-time preservation.
-- Dynamic interval changes at runtime.
-- Slot reuse through destroy/create.
-- Named timer lookup for diagnostics and shell commands.
-- Per-timer and global fire counters.
+- Clock units are milliseconds on an unsigned 32-bit modulo counter.
+- Natural `uint32_t` wraparound is supported if the clock is not reset while timers are active.
+- `mtimer_tick()` fires each running timer at most once per successful call.
+- Missed periodic intervals are skipped without callback bursts; phase is retained when only one interval is due.
+- Timer names are optional and caller-owned. Non-`NULL` names must remain valid, immutable, and unique per manager.
+- Timer IDs are slot indexes. Destroying a timer invalidates its ID, and later creates may reuse that slot.
+- Same-manager mutation during callbacks returns `MTIMER_ERR_BUSY`.
 
-## Build and Test
+## Build
 
-Requirements:
-- C99 compiler (`gcc` or `clang`)
-- `make`
-
-Run tests:
+### CMake
 
 ```bash
-# clone microtest next to this repository root
-# expected path: ../microtest/include
-make -C tests
+cmake -S . -B build -DMICROTIMER_BUILD_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-## Public API
+### Make
 
-Key functions:
-- `mtimer_init`
-- `mtimer_create`, `mtimer_destroy`
-- `mtimer_start`, `mtimer_stop`, `mtimer_pause`, `mtimer_resume`
-- `mtimer_set_interval`
-- `mtimer_tick`
-- `mtimer_count`, `mtimer_find`, `mtimer_remaining`
+```bash
+make
+```
 
-See [`include/mtimer.h`](include/mtimer.h) for full API details.
+Caller-provided `CC`, `CPPFLAGS`, `CFLAGS`, and `LDFLAGS` are honored by the Makefiles.
 
-## Repository Layout
+## Documentation
 
-- `include/mtimer.h` - public API
-- `src/mtimer.c` - implementation
-- `tests/test_all.c` - unit tests
-- `docs/DESIGN.md` - design rationale
+- [API reference](docs/API_REFERENCE.md)
+- [Cookbook](docs/COOKBOOK.md)
+- [Design notes](docs/DESIGN.md)
+- [Issues and troubleshooting](docs/ISSUES.md)
+- [Porting guide](docs/PORTING_GUIDE.md)
+- [Verification status](docs/VERIFICATION.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security reporting](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 
-## Ecosystem
-
-- [microhealth](https://github.com/Vanderhell/microhealth)
-- [microwdt](https://github.com/Vanderhell/microwdt)
-- [microres](https://github.com/Vanderhell/microres)
-- [microsh](https://github.com/Vanderhell/microsh)
-
-## Configuration
-
-- `MTIMER_MAX_TIMERS` (default: `8`)
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md).
-
-## License
-
-MIT - see [LICENSE](LICENSE).
+Releases are tag-driven through `.github/workflows/release.yml` and are only published from pushed `v*` tags.
