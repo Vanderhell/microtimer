@@ -333,7 +333,6 @@ int mtimer_tick(mtimer_t *tm)
     for (i = 0; i < MTIMER_MAX_TIMERS; ++i) {
         mtimer_entry_t *timer;
         uint32_t elapsed_ms;
-        uint32_t intervals_elapsed;
         mtimer_cb_fn callback;
         void *ctx;
 
@@ -358,6 +357,7 @@ int mtimer_tick(mtimer_t *tm)
             timer->state_storage = (uint8_t)MTIMER_STOPPED;
             timer->remaining_ms = 0u;
         } else {
+            uint32_t intervals_elapsed;
             intervals_elapsed = elapsed_ms / timer->interval_ms;
             timer->start_ms += intervals_elapsed * timer->interval_ms;
             timer->remaining_ms = 0u;
